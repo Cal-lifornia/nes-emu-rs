@@ -228,6 +228,11 @@ impl CPU {
         }
     }
 
+    fn get_relative_offset(&self) -> u16 {
+        let offset = self.mem_read(self.program_counter + 1);
+        (self.program_counter as i16 + offset.cast_signed() as i16) as u16
+    }
+
     pub fn run(&mut self) {
         use Instruction::*;
         loop {
@@ -269,6 +274,21 @@ impl CPU {
                     let value = self.mem_read(addr);
                     self.set_register_a(self.register_a & value);
                 }
+                BCC => {
+                    if !self.status.contains(CpuStatus::CARRY) {
+                        self.program_counter = self.get_relative_offset();
+                    }
+                }
+                BCS => {
+                    if self.status.contains(CpuStatus::CARRY) {
+                        self.program_counter = self.get_relative_offset()
+                    }
+                }
+                BEQ => {
+                    if self.status.contains(CpuStatus::ZERO) {
+                        self.program_counter = self.get_relative_offset()
+                    }
+                }
                 BIT => {
                     let addr = self.get_operand_address(&command.addressing_mode);
                     let value = self.mem_read(addr);
@@ -278,10 +298,35 @@ impl CPU {
                     self.status
                         .set(CpuStatus::OVERFLOW, value & 0b01000000 != 0);
                 }
+                BMI => {
+                    if self.status.contains(CpuStatus::NEGATIVE) {
+                        self.program_counter = self.get_relative_offset();
+                    }
+                }
+                BNE => {
+                    if !self.status.contains(CpuStatus::ZERO) {
+                        self.program_counter = self.get_relative_offset();
+                    }
+                }
+                BPL => {
+                    if !self.status.contains(CpuStatus::NEGATIVE) {
+                        self.program_counter = self.get_relative_offset();
+                    }
+                }
 
                 BRK => {
                     self.status.insert(CpuStatus::BREAK);
                     return;
+                }
+                BVC => {
+                    if !self.status.contains(CpuStatus::OVERFLOW) {
+                        self.program_counter = self.get_relative_offset();
+                    }
+                }
+                BVS => {
+                    if self.status.contains(CpuStatus::OVERFLOW) {
+                        self.program_counter = self.get_relative_offset();
+                    }
                 }
                 CLC => {
                     self.status.remove(CpuStatus::CARRY);
@@ -423,6 +468,7 @@ impl CPU {
                     self.stack_push(self.register_a);
                 }
                 PHP => {
+                    self.status.insert(CpuStatus::BREAK);
                     self.stack_push(self.status.bits());
                 }
                 PLA => {
@@ -536,7 +582,12 @@ impl CPU {
                 TXA => {
                     self.set_register_a(self.register_x);
                 }
-                _ => todo!(),
+                TXS => {
+                    self.stack_push(self.register_x);
+                }
+                TYA => {
+                    self.set_register_a(self.register_y);
+                }
             }
 
             self.program_counter += (command.len - 1) as u16;
