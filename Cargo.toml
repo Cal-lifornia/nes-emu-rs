@@ -6,3 +6,5 @@ edition = "2024"
 [dependencies]
 bitflags = "2.9.3"
 hashbrown = "0.16.0"
+sdl2 = "0.38"
+rand = "0.7.3"
