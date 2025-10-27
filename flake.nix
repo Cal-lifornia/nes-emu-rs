@@ -34,8 +34,8 @@
             buildInputs = with pkgs; [
               # rust toolchain
               # use rust-analyzer-nightly for better type inference
-              SDL2
               rust-analyzer
+              SDL2
               (rust-bin.stable.latest.default)
             ];
 
