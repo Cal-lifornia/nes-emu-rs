@@ -2,7 +2,7 @@ use std::{hash::Hash, sync::LazyLock};
 
 use hashbrown::HashSet;
 
-pub static CPU_OPS_CODES: LazyLock<HashSet<OpCode>> = LazyLock::new(|| {
+pub static CPU_OP_CODES: LazyLock<HashSet<OpCode>> = LazyLock::new(|| {
     use AddressingMode::*;
     use Instruction::*;
     let contents = &[

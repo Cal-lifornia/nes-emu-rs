@@ -1,59 +1,10 @@
-use bitflags::{Flags, bitflags};
+use crate::hardware::{
+    Gamepad,
+    opcode::{AddressingMode, CPU_OP_CODES, Instruction},
+    status::CpuStatus,
+};
 
-use crate::opcode::{AddressingMode, CPU_OPS_CODES, Instruction};
-
-bitflags! {
-    /// # Status Register (P) http://wiki.nesdev.com/w/index.php/Status_flags
-    ///
-    ///  7 6 5 4 3 2 1 0
-    ///  N V _ B D I Z C
-    ///  | |   | | | | +--- Carry Flag
-    ///  | |   | | | +----- Zero Flag
-    ///  | |   | | +------- Interrupt Disable
-    ///  | |   | +--------- Decimal Mode (not used on NES)
-    ///  | |   +----------- Break Command
-    ///  | +--------------- Overflow Flag
-    ///  +----------------- Negative Flag
-    ///
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct CpuStatus: u8 {
-        /// Carry is set during unsigned additions when the sum
-        /// of the two products
-        /// is greater than 255/0xff
-        const CARRY        =  0b00000001;
-        const ZERO         =  0b00000010;
-        const INTERRUPT    =  0b00000100;
-        const DECIMAL_MODE =  0b00001000;
-        const BREAK        =  0b00010000;
-        /// Overflow is set during signed additions and when the sum
-        /// of the two numbers could be less than -128 or greater than 127.
-        /// This can only occur when both parameters are negative or positive when
-        /// represented as a signed number
-        const OVERFLOW     =  0b01000000;
-        const NEGATIVE     =  0b10000000;
-    }
-}
-
-impl PartialEq<u8> for CpuStatus {
-    fn eq(&self, other: &u8) -> bool {
-        self.bits() == *other
-    }
-}
-
-impl Default for CpuStatus {
-    fn default() -> Self {
-        Self::empty()
-    }
-}
-
-impl CpuStatus {
-    fn update_zero_and_negative_flags(&mut self, value: u8) {
-        self.set(CpuStatus::ZERO, value == 0);
-        self.set(CpuStatus::NEGATIVE, value & 0b1000_0000 != 0);
-    }
-}
-
-const STACK_RESET: u8 = 0xFF;
+const STACK_RESET: u8 = 0xFD;
 const STACK: u16 = 0x0100;
 
 #[allow(clippy::upper_case_acronyms)]
@@ -73,7 +24,7 @@ impl Default for CPU {
             register_a: 0,
             register_x: 0,
             register_y: 0,
-            status: CpuStatus::default(),
+            status: CpuStatus::from_bits_truncate(0b100100),
             program_counter: 0,
             stack_pointer: STACK_RESET,
             memory: [0; 0xFFFF],
@@ -87,9 +38,9 @@ impl CPU {
         self.register_x = 0;
         self.register_y = 0;
         self.stack_pointer = STACK_RESET;
-        self.status.clear();
+        self.status = CpuStatus::from_bits_truncate(0b100100);
 
-        self.program_counter = self.mem_read_u16(0xFFFC)
+        self.program_counter = self.mem_read_u16(0xFFFC);
     }
 
     pub fn mem_read(&self, addr: u16) -> u8 {
@@ -236,6 +187,15 @@ impl CPU {
             .wrapping_add(jump as u16)
     }
 
+    fn compare(&mut self, mode: &AddressingMode, data: u8) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+
+        self.status.set(CpuStatus::CARRY, data >= value);
+        self.status
+            .update_zero_and_negative_flags(data.wrapping_sub(value));
+    }
+
     pub fn run_with_callback<F>(&mut self, mut callback: F)
     where
         F: FnMut(&mut CPU),
@@ -246,7 +206,7 @@ impl CPU {
             self.program_counter += 1;
 
             let program_counter_state = self.program_counter;
-            let command = CPU_OPS_CODES
+            let command = CPU_OP_CODES
                 .get(&opscode)
                 .unwrap_or_else(|| panic!("Expected valid opcode: {opscode:X?}"));
 
@@ -300,10 +260,10 @@ impl CPU {
                     let addr = self.get_operand_address(&command.addressing_mode);
                     let value = self.mem_read(addr);
 
-                    self.status.update_zero_and_negative_flags(value);
-
                     self.status
-                        .set(CpuStatus::OVERFLOW, value & 0b01000000 != 0);
+                        .set(CpuStatus::ZERO, self.register_a & value == 0);
+                    self.status.set(CpuStatus::NEGATIVE, 0b10000000 > 0);
+                    self.status.set(CpuStatus::OVERFLOW, 0b01000000 > 0);
                 }
                 BMI => {
                     if self.status.contains(CpuStatus::NEGATIVE) {
@@ -345,28 +305,13 @@ impl CPU {
                     self.status.remove(CpuStatus::OVERFLOW);
                 }
                 CMP => {
-                    let addr = self.get_operand_address(&command.addressing_mode);
-                    let value = self.mem_read(addr);
-
-                    self.status.set(CpuStatus::CARRY, self.register_a >= value);
-                    self.status.set(CpuStatus::ZERO, self.register_a == value);
-                    self.status.set(CpuStatus::NEGATIVE, value & 0x80 != 0);
+                    self.compare(&command.addressing_mode, self.register_a);
                 }
                 CPX => {
-                    let addr = self.get_operand_address(&command.addressing_mode);
-                    let value = self.mem_read(addr);
-
-                    self.status.set(CpuStatus::CARRY, self.register_x >= value);
-                    self.status.set(CpuStatus::ZERO, self.register_x == value);
-                    self.status.set(CpuStatus::NEGATIVE, value & 0x80 != 0);
+                    self.compare(&command.addressing_mode, self.register_x);
                 }
                 CPY => {
-                    let addr = self.get_operand_address(&command.addressing_mode);
-                    let value = self.mem_read(addr);
-
-                    self.status.set(CpuStatus::CARRY, self.register_y >= value);
-                    self.status.set(CpuStatus::ZERO, self.register_y == value);
-                    self.status.set(CpuStatus::NEGATIVE, value & 0x80 != 0);
+                    self.compare(&command.addressing_mode, self.register_y);
                 }
                 DEC => {
                     let addr = self.get_operand_address(&command.addressing_mode);

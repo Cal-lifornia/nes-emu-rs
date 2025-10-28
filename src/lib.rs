@@ -1,3 +1,2 @@
-pub mod cpu;
-pub mod opcode;
-pub mod snake;
+pub mod app;
+pub mod hardware;
